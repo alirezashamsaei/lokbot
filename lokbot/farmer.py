@@ -12,7 +12,7 @@ import socketio
 import tenacity
 
 import lokbot.util
-from lokbot import logger, socf_logger, sock_logger, socc_logger
+from lokbot import logger, socf_logger, sock_logger, socc_logger, config
 from lokbot.client import LokBotApi
 from lokbot.enum import *
 from lokbot.exceptions import OtherException, FatalApiException
@@ -87,16 +87,16 @@ class LokFarmer:
         self.kingdom_enter = self.api.kingdom_enter()
         self.alliance_id = self.kingdom_enter.get('kingdom', {}).get('allianceId')
 
-        self.api.auth_set_device_info({
-            "build": "global",
-            "OS": "Windows 10",
-            "country": "USA",
-            "language": "English",
-            "bundle": "",
-            "version": "1.1694.152.229",
-            "platform": "web",
-            "pushId": ""
-        })
+        # Get device_info from config with validation
+        auth_config = config.get('auth')
+        if not auth_config:
+            raise FatalApiException("'auth' section not found in config.json")
+        
+        device_info = auth_config.get('device_info')
+        if not device_info:
+            raise FatalApiException("device_info not found in config.json under 'auth' section")
+        
+        self.api.auth_set_device_info(device_info)
 
         self.api.chat_logs(f'w{self.kingdom_enter.get("kingdom").get("worldId")}')
         if self.alliance_id:

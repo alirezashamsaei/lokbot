@@ -1,17 +1,3 @@
-# Disclaimer
-
-```c
-#include <std_disclaimer.h>
-/*
- *
- * We are not responsible for banned account or any other punishment by this game's GM. 
- * Please do some research if you have any concerns about features included in this repo
- * before using it! YOU are choosing to use these scripts, and if
- * you point the finger at us for messing up your account, we will laugh at you.
- *
- */
-```
-
 # lok_bot
 
 ![lok_crystal_miner](https://user-images.githubusercontent.com/5501843/161889542-decefcc7-1c51-4998-adf1-53d366118fa3.gif)

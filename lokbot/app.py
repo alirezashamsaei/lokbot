@@ -41,12 +41,18 @@ def async_main(token):
     asyncio.run(async_farmer.parallel_buy_caravan())
 
 
-def main(token, captcha_solver_config=None):
+def main(token=None, captcha_solver_config=None):
     # async_main(token)
     # exit()
 
     if captcha_solver_config is None:
         captcha_solver_config = {}
+    
+    # Load token from config if not provided
+    if token is None:
+        token = config.get('auth', {}).get('x-token')
+        if not token:
+            token = input("Please enter x-token: ")
 
     _id = lokbot.util.decode_jwt(token).get('_id')
     token_file = project_root.joinpath(f'data/{_id}.token')
