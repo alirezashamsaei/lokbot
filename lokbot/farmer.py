@@ -480,6 +480,14 @@ class LokFarmer:
         nearby_zone_ids = neighbors(self._get_zone_array(), radius, idx[0] + 1, idx[1] + 1)
         nearby_zone_ids = [item.item() for sublist in nearby_zone_ids for item in sublist if item != 0]
 
+        # Sort zones by distance from current position (nearest first)
+        def zone_distance(zone_id):
+            zone_x = (zone_id % 64) * 32 + 16  # Center X of zone
+            zone_y = (zone_id // 64) * 32 + 16  # Center Y of zone
+            return ((zone_x - x) ** 2 + (zone_y - y) ** 2) ** 0.5
+
+        nearby_zone_ids.sort(key=zone_distance)
+
         return nearby_zone_ids
 
     def _update_march_limit(self):
