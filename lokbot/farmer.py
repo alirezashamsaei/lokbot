@@ -482,9 +482,9 @@ class LokFarmer:
 
         # Sort zones by distance from current position (nearest first)
         def zone_distance(zone_id):
-            zone_x = (zone_id % 64) * 32 + 16  # Center X of zone
-            zone_y = (zone_id // 64) * 32 + 16  # Center Y of zone
-            return ((zone_x - x) ** 2 + (zone_y - y) ** 2) ** 0.5
+            zone_x = (int(zone_id) % 64) * 32 + 16  # Center X of zone
+            zone_y = (int(zone_id) // 64) * 32 + 16  # Center Y of zone
+            return ((zone_x - int(x)) ** 2 + (zone_y - int(y)) ** 2) ** 0.5
 
         nearby_zone_ids.sort(key=zone_distance)
 
@@ -764,9 +764,9 @@ class LokFarmer:
         url = self.kingdom_enter.get('networks').get('fields')[0]
         from_loc = self.kingdom_enter.get('kingdom').get('loc')
 
-        if not self.zones:
-            logger.info('getting nearest zone')
-            self.zones = self._get_nearest_zone_ng(from_loc[1], from_loc[2], radius)
+        # Always recalculate zones to ensure proper sorting each run
+        logger.info('getting nearest zones')
+        self.zones = self._get_nearest_zone_ng(from_loc[1], from_loc[2], radius)
 
         sio = socketio.Client(reconnection=False, logger=socf_logger, engineio_logger=socf_logger)
 
@@ -777,6 +777,15 @@ class LokFarmer:
             data_decoded = self.api.b64xor_dec(gzip_decompress)
             objects = data_decoded.get('objects')
             target_code_set = set([target['code'] for target in targets])
+
+            # Sort objects by distance from player's castle (nearest first)
+            def object_distance(obj):
+                obj_loc = obj.get('loc')
+                if not obj_loc or len(obj_loc) < 3:
+                    return float('inf')  # Invalid location, push to end
+                return ((obj_loc[1] - from_loc[1]) ** 2 + (obj_loc[2] - from_loc[2]) ** 2) ** 0.5
+
+            objects.sort(key=object_distance)
 
             logger.debug(f'Processing {len(objects)} objects')
             for each_obj in objects:
