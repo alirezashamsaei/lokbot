@@ -479,7 +479,12 @@ class LokFarmer:
 
         nearby_zone_ids = neighbors(self._get_zone_array(), radius, idx[0] + 1, idx[1] + 1)
         nearby_zone_ids = [item.item() for sublist in nearby_zone_ids for item in sublist if item != 0]
-
+        # TODO: Remove this after testing
+        logger.info("-" * 50)
+        logger.warning(f'current_zone_id: {current_zone_id}')
+        logger.warning(f'nearby_zone_ids: {nearby_zone_ids}')
+        logger.info("-" * 50)
+        
         return nearby_zone_ids
 
     def _update_march_limit(self):
@@ -770,7 +775,7 @@ class LokFarmer:
             objects = data_decoded.get('objects')
             target_code_set = set([target['code'] for target in targets])
 
-            logger.debug(f'Processing {len(objects)} objects')
+            logger.warning(f'Processing {len(objects)} objects')
             for each_obj in objects:
                 if self._is_march_limit_exceeded():
                     continue
@@ -784,16 +789,6 @@ class LokFarmer:
                     # not the one we are looking for
                     continue
 
-                if share_to and share_to.get('chat_channels'):
-                    for chat_channel in share_to.get('chat_channels'):
-                        text = f'Lv.{level}?fo_{code}'
-                        obj_hash = f'{text}_{loc[0]}_{loc[1]}_{loc[2]}'
-                        if obj_hash in self.shared_objects:
-                            # already shared
-                            continue
-
-                        self.shared_objects.add(obj_hash)
-                        self.api.chat_new(chat_channel, CHAT_TYPE_LOC, text, {'loc': loc})
 
                 if code == OBJECT_CODE_DRAGON_SOUL_CAVERN:
                     if self.drago_action_point < 1:
