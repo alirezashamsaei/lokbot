@@ -4,38 +4,38 @@ from lokbot import project_root
 
 API_BASE_URL = 'https://api-lok-live.leagueofkingdoms.com/api/'
 
-# 刚进游戏
+# Just entered the game
 TUTORIAL_CODE_INTRO = 'Intro'
-# 完成改名字主线后, 弹出 "学徒的板条箱 $0.99" 购买按钮
+# After completing the name change main quest, popup "Apprentice's Crate $0.99" purchase button
 TUTORIAL_CODE_START = 'TutorialStart'
 
-# 任务状态
-STATUS_PENDING = 1  # 未完成任务
-STATUS_FINISHED = 2  # 已完成待领取奖励
-STATUS_CLAIMED = 3  # 已领取奖励
+# Quest status
+STATUS_PENDING = 1  # Incomplete quest
+STATUS_FINISHED = 2  # Completed, ready to claim reward
+STATUS_CLAIMED = 3  # Reward claimed
 
-# 任务类型 code
-TASK_CODE_SILVER_HAMMER = 1  # 免费建筑工
-TASK_CODE_GOLD_HAMMER = 8  # 黄金建筑工
-TASK_CODE_CAMP = 3  # 军营
-TASK_CODE_ACADEMY = 6  # 学院
+# Quest type code
+TASK_CODE_SILVER_HAMMER = 1  # Free builder
+TASK_CODE_GOLD_HAMMER = 8  # Gold builder
+TASK_CODE_CAMP = 3  # Barracks
+TASK_CODE_ACADEMY = 6  # Academy
 
-BUILDING_STATE_NORMAL = 1  # 正常
-BUILDING_STATE_UPGRADING = 2  # 升级中
+BUILDING_STATE_NORMAL = 1  # Normal
+BUILDING_STATE_UPGRADING = 2  # Upgrading
 
-# 龙巢状态
-DRAGO_LAIR_STATUS_STANDBY = 1  # 待命中
-DRAGO_LAIR_STATUS_DEFENDING = 2  # 防守中
-DRAGO_LAIR_STATUS_ATTACKING = 3  # 出击中
+# Dragon Lair status
+DRAGO_LAIR_STATUS_STANDBY = 1  # On standby
+DRAGO_LAIR_STATUS_DEFENDING = 2  # Defending
+DRAGO_LAIR_STATUS_ATTACKING = 3  # Attacking
 
-# 聊天: 频道类型
-CHAT_CHANNEL_WORLD = 1  # 世界频道
-CHAT_CHANNEL_ALLIANCE = 2  # 联盟频道
+# Chat: Channel type
+CHAT_CHANNEL_WORLD = 1  # World channel
+CHAT_CHANNEL_ALLIANCE = 2  # Alliance channel
 
-# 聊天: 消息类型
-CHAT_TYPE_TEXT = 1  # 文字
-CHAT_TYPE_LOC = 2  # 位置
-CHAT_TYPE_STICKER = 7  # 贴纸
+# Chat: Message type
+CHAT_TYPE_TEXT = 1  # Text
+CHAT_TYPE_LOC = 2  # Location
+CHAT_TYPE_STICKER = 7  # Sticker
 
 BUILDING_POSITION_MAP = {
     'academy': 5,
@@ -98,7 +98,7 @@ BUILD_POSITION_UNLOCK_MAP = {
     ),
 }
 
-# 可收获的资源
+# Harvestable resources
 HARVESTABLE_CODE = [
     BUILDING_CODE_MAP['farm'],
     BUILDING_CODE_MAP['lumber_camp'],
@@ -469,7 +469,7 @@ OBJECT_MONSTER_CODE_LIST = (
 )
 
 RESEARCH_CODE_MAP = {
-    # 生产优先
+    # Production priority
     'production': {
         'food_production': 30102001,
         'wood_production': 30102002,
@@ -506,7 +506,7 @@ RESEARCH_CODE_MAP = {
         'advanced_gold_gathering_speed': 30102033,
         'advanced_crystal_gathering_speed': 30102034,
     },
-    # 训练其次
+    # Training second
     'battle': {
         'infantry_hp': 30101001,
         'ranged_hp': 30101002,
