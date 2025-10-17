@@ -143,7 +143,7 @@ class LokFarmer:
                 if t.get('code') == TASK_CODE_CAMP:
                     return False
 
-        # 暂时忽略联盟中心
+        # Temporarily ignore alliance hall
         if building.get('code') == BUILDING_CODE_MAP['hall_of_alliance']:
             return False
 
@@ -196,11 +196,11 @@ class LokFarmer:
             req_level = int(requirement.get('level'))
             req_type = requirement.get('type')
 
-            # 判断学院等级
+            # Check academy level
             if req_type == 'academy' and req_level > academy_level:
                 return False
 
-            # 判断前置研究是否完成
+            # Check if prerequisite research is completed
             if req_type != 'academy' and not [each for each in exist_researches if
                                               each.get('code') == research_category.get(req_type)
                                               and each.get('level') >= req_level]:
@@ -911,7 +911,7 @@ class LokFarmer:
 
     def harvester(self):
         """
-        收获资源
+        Harvest resources
         :return:
         """
         buildings = self.kingdom_enter.get('kingdom', {}).get('buildings', [])
@@ -926,7 +926,7 @@ class LokFarmer:
             if code not in HARVESTABLE_CODE:
                 continue
 
-            # 每个种类只需要收获一次, 就会自动收获整个种类下所有资源
+            # Each type only needs to be harvested once, will automatically harvest all resources of that type
             if code in harvested_code:
                 continue
 
@@ -936,7 +936,7 @@ class LokFarmer:
 
     def quest_monitor_thread(self):
         """
-        任务监控
+        Quest monitoring
         :return:
         """
         quest_list = self.api.quest_list()
@@ -947,7 +947,7 @@ class LokFarmer:
         # side quest(max 5)
         if len([self.api.quest_claim(q) for q in quest_list.get('sideQuests') if
                 q.get('status') == STATUS_FINISHED]) >= 5:
-            # 若五个均为已完成, 则翻页
+            # If all five are completed, then turn page
             threading.Thread(target=self.quest_monitor_thread).start()
             return
 
@@ -956,7 +956,7 @@ class LokFarmer:
         # daily quest(max 5)
         if len([self.api.quest_claim_daily(q) for q in quest_list_daily.get('quests') if
                 q.get('status') == STATUS_FINISHED]) >= 5:
-            # 若五个均为已完成, 则翻页
+            # If all five are completed, then turn page
             threading.Thread(target=self.quest_monitor_thread).start()
             return
 
@@ -1067,7 +1067,7 @@ class LokFarmer:
                 threading.Thread(target=self.academy_farmer_thread, args=[to_max_level, speedup]).start()
                 return
 
-            # 如果已完成, 则领取奖励并继续
+            # If completed, claim reward and continue
             self.api.kingdom_task_claim(BUILDING_POSITION_MAP['academy'])
 
         exist_researches = self.api.kingdom_academy_research_list().get('researches', [])
@@ -1196,7 +1196,7 @@ class LokFarmer:
 
     def free_chest_farmer_thread(self, _type=0):
         """
-        领取免费宝箱
+        Claim free chest
         :return:
         """
         try:
@@ -1239,7 +1239,7 @@ class LokFarmer:
 
     def vip_chest_claim(self):
         """
-        领取vip宝箱
+        Claim VIP chest
         daily
         :return:
         """
