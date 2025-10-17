@@ -637,7 +637,6 @@ class LokFarmer:
         return True
 
     @tenacity.retry(
-        stop=tenacity.stop_after_attempt(4),
         wait=tenacity.wait_random_exponential(multiplier=1, max=60),
         retry=tenacity.retry_if_not_exception_type(FatalApiException),
         reraise=True
@@ -728,7 +727,6 @@ class LokFarmer:
         raise tenacity.TryAgain()
 
     @tenacity.retry(
-        stop=tenacity.stop_after_attempt(4),
         wait=tenacity.wait_random_exponential(multiplier=1, max=60),
         retry=tenacity.retry_if_not_exception_type(FatalApiException),
         reraise=True
@@ -776,6 +774,8 @@ class LokFarmer:
             target_code_set = set([target['code'] for target in targets])
 
             logger.warning(f'Processing {len(objects)} objects')
+            
+            ignored_fields = []
             for each_obj in objects:
                 if self._is_march_limit_exceeded():
                     continue
@@ -800,7 +800,7 @@ class LokFarmer:
 
                 level_whitelist = level_whitelist[0]
                 if level_whitelist and level not in level_whitelist:
-                    logger.info(f'level not in whitelist, ignore: {each_obj}')
+                    ignored_fields.append(each_obj)
                     continue
 
                 res = False
@@ -824,6 +824,7 @@ class LokFarmer:
                     if res is True:
                         logger.info(f'march_started {code}({level}): {each_obj}')
 
+            logger.info(f'Items ignored: {", ".join([each.get("loc") for each in ignored_fields])}')
             self.field_object_processed = True
 
         @sio.on('/field/enter/v3')
@@ -887,7 +888,6 @@ class LokFarmer:
         sio.wait()
 
     @tenacity.retry(
-        stop=tenacity.stop_after_attempt(4),
         wait=tenacity.wait_random_exponential(multiplier=1, max=60),
         retry=tenacity.retry_if_not_exception_type(FatalApiException),
         reraise=True
