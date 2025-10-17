@@ -266,6 +266,14 @@ Here's a complete example configuration with all features enabled:
             {
               "code": 20100106,
               "level": []
+            },
+            {
+              "code": 20200101,
+              "level": []
+            },
+            {
+              "code": 20200102,
+              "level": []
             }
           ],
           "radius": 8,
@@ -340,16 +348,126 @@ Here's a complete example configuration with all features enabled:
 | Sniper | 50100205 | 5 |
 | Dragon | 50100305 | 5 |
 
-## Object Codes Reference
+## Complete Object Codes Reference
 
-| Object Name | Code | Type |
-|-------------|------|------|
-| Crystal Mine | 20100105 | Resource |
-| Dragon Soul Cavern | 20100106 | Resource |
-| Orc | 20200101 | Monster |
-| Skeleton | 20200102 | Monster |
-| Golem | 20200103 | Monster |
-| Goblin | 20200104 | Monster |
+This section provides a comprehensive reference for all field objects and monsters that can be targeted by the bot's field farming system (`socf_thread`).
+
+### Object Categories
+
+- **Resource Objects**: Basic resource production buildings (farms, mines, etc.)
+- **Battlefield Resource Objects**: Special battlefield versions of resource buildings
+- **Special Buildings**: Unique structures like kingdoms, shrines, and alliance buildings
+- **Gates and Fortresses**: Transportation and defensive structures
+- **Charms**: Special items that can be found in the field
+- **Monsters**: Hostile creatures that can be attacked for loot
+
+### Resource Objects
+
+| Object Name | Code | Type | Description |
+|-------------|------|------|-------------|
+| Farm | 20100101 | Resource | Food production building |
+| Forest | 20100102 | Resource | Lumber production building |
+| Quarry | 20100103 | Resource | Stone production building |
+| Gold Mine | 20100104 | Resource | Gold production building |
+| Crystal Mine | 20100105 | Resource | Crystal production building |
+| Sealed Mine | 20100106 | Resource | Dragon Soul production building |
+| Monster Fortress | 20100201 | Special | Monster stronghold |
+
+### Battlefield Resource Objects
+
+| Object Name | Code | Type | Description |
+|-------------|------|------|-------------|
+| BF Farm | 20700601 | Battlefield Resource | Battlefield food production |
+| BF Forest | 20700602 | Battlefield Resource | Battlefield lumber production |
+| BF Quarry | 20700603 | Battlefield Resource | Battlefield stone production |
+| BF Gold Mine | 20700604 | Battlefield Resource | Battlefield gold production |
+| BF Crystal Mine | 20700605 | Battlefield Resource | Battlefield crystal production |
+
+### Special Buildings
+
+| Object Name | Code | Type | Description |
+|-------------|------|------|-------------|
+| Kingdom | 20300101 | Special | Kingdom capital |
+| Congress | 20400101 | Special | Government building |
+| Shrine 1 | 20400201 | Special | Religious building |
+| Shrine 2 | 20400202 | Special | Religious building |
+| Shrine 3 | 20400203 | Special | Religious building |
+| Alliance Center | 20600101 | Alliance | Alliance headquarters |
+| Alliance Tower | 20600102 | Alliance | Alliance defensive structure |
+| Outpost | 20600103 | Alliance | Alliance outpost |
+
+### Gates and Fortresses
+
+| Object Name | Code | Type | Description |
+|-------------|------|------|-------------|
+| Gate 1 | 20700101 | Gate | Transportation gate |
+| Gate 2 | 20700102 | Gate | Transportation gate |
+| Gate 3 | 20700103 | Gate | Transportation gate |
+| Gate 4 | 20700104 | Gate | Transportation gate |
+| Gate 5 | 20700105 | Gate | Transportation gate |
+| Fortress 1 | 20700201 | Fortress | Defensive fortress |
+| Fortress 2 | 20700202 | Fortress | Defensive fortress |
+| Ancient Temple | 20700301 | Special | Ancient structure |
+
+### Charms
+
+| Object Name | Code | Type | Description |
+|-------------|------|------|-------------|
+| Charm Normal | 20500101 | Charm | Normal quality charm |
+| Charm Magic | 20500102 | Charm | Magic quality charm |
+| Charm Epic | 20500103 | Charm | Epic quality charm |
+| Charm Legend | 20500104 | Charm | Legendary quality charm |
+
+## Complete Monster Codes Reference
+
+| Monster Name | Code | Type | Description |
+|-------------|------|------|-------------|
+| Orc | 20200101 | Monster | Basic monster unit |
+| Skeleton | 20200102 | Monster | Undead monster unit |
+| Golem | 20200103 | Monster | Stone construct monster |
+| Treasure Goblin | 20200104 | Monster | Special loot monster |
+| Deathkar | 20200201 | Boss | Elite boss monster |
+| Green Dragon | 20200202 | Dragon | Green dragon boss |
+| Red Dragon | 20200203 | Dragon | Red dragon boss |
+| Gold Dragon | 20200204 | Dragon | Gold dragon boss |
+| Magdar | 20200205 | Boss | Ultimate boss monster |
+
+## Using Object and Monster Codes in Configuration
+
+When configuring the `socf_thread` job, you can target any of the objects or monsters listed above by using their codes in the `targets` array. Here are some common targeting strategies:
+
+### Resource Farming
+```json
+"targets": [
+  {"code": 20100101, "level": []},  // All Farm levels
+  {"code": 20100102, "level": [5, 6, 7]},  // Forest levels 5-7
+  {"code": 20100105, "level": [1]}  // Only Crystal Mine level 1
+]
+```
+
+### Monster Hunting
+```json
+"targets": [
+  {"code": 20200101, "level": []},  // All Orc levels
+  {"code": 20200102, "level": []},  // All Skeleton levels
+  {"code": 20200104, "level": []}   // All Treasure Goblin levels
+]
+```
+
+### Mixed Targeting
+```json
+"targets": [
+  {"code": 20100105, "level": [1]},  // Crystal Mine level 1
+  {"code": 20100106, "level": []},    // All Sealed Mine levels
+  {"code": 20200101, "level": []},    // All Orc levels
+  {"code": 20200104, "level": []}     // All Treasure Goblin levels
+]
+```
+
+### Level Filtering
+- **Empty array `[]`**: Target all levels of that object/monster
+- **Specific levels `[1, 2, 3]`**: Target only the specified levels
+- **Single level `[1]`**: Target only level 1
 
 ## Item Codes Reference
 

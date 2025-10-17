@@ -83,7 +83,7 @@ class LokFarmer:
             logger.debug(f'xor_password: {self.api.xor_password}')
             self.token = auth_res.get('token')
             self._id = lokbot.util.decode_jwt(token).get('_id')
-            project_root.joinpath(f'data/{self._id}.token').write_text(self.token)
+            project_root.joinpath('data/token').write_text(self.token)
 
             self.kingdom_enter = self.api.kingdom_enter()
             self.alliance_id = self.kingdom_enter.get('kingdom', {}).get('allianceId')
@@ -500,12 +500,7 @@ class LokFarmer:
         zone_distances.sort(key=lambda x: x[1])
         sorted_zone_ids = [zone_id for zone_id, _ in zone_distances]
         
-        # TODO: Remove this after testing
-        logger.info("-" * 50)
-        logger.warning(f'current_zone_id: {current_zone_id}')
-        logger.warning(f'nearby_zone_ids: {sorted_zone_ids[:10]}')  # Show first 10 for brevity
-        logger.warning(f'distances: {[d for _, d in zone_distances[:10]]}')  # Show distances
-        logger.info("-" * 50)
+
         
         return sorted_zone_ids
 

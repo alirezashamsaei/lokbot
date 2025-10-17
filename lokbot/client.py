@@ -117,7 +117,7 @@ class LokBotApi:
 
         log_data.update({'res': json_response})
 
-        logger.debug(json.dumps(log_data))
+        # logger.debug(json.dumps(log_data))
 
         if json_response.get('result'):
             if callable(self.request_callback):

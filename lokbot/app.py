@@ -48,49 +48,35 @@ def main(token=None, captcha_solver_config=None):
     if captcha_solver_config is None:
         captcha_solver_config = {}
     
-    # Load token from permanent token file
+    # Load token from /data/token file
     if token is None:
-        # First, try to get user ID from any existing token file
-        _id = None
-        token_file = None
+        token_file = project_root.joinpath('data/token')
         
-        # Look for existing token files in data directory
-        data_dir = project_root.joinpath('data')
-        if data_dir.exists():
-            for file_path in data_dir.glob('*.token'):
-                try:
-                    # Try to decode the token to get user ID
-                    token_content = file_path.read_text().strip()
-                    if token_content:
-                        _id = lokbot.util.decode_jwt(token_content).get('_id')
-                        token_file = file_path
-                        break
-                except:
-                    continue
-        
-        if token_file and token_file.exists():
+        if token_file.exists():
             token_from_file = token_file.read_text().strip()
-            logger.info(f'Using token from file: {token_file}')
-            try:
-                farmer = LokFarmer(token_from_file, captcha_solver_config)
-            except NoAuthException:
-                logger.warning('Token from file is invalid, prompting for new token')
+            if token_from_file:
+                logger.info(f'Using token from file: {token_file}')
+                try:
+                    farmer = LokFarmer(token_from_file, captcha_solver_config)
+                except NoAuthException:
+                    logger.warning('Token from file is invalid, prompting for new token')
+                    token = input("Please enter x-token: ")
+                    # Save the new token to /data/token
+                    token_file.write_text(token)
+                    farmer = LokFarmer(token, captcha_solver_config)
+            else:
+                # Empty token file, prompt user for token
                 token = input("Please enter x-token: ")
-                _id = lokbot.util.decode_jwt(token).get('_id')
-                # Save the new token to permanent file
-                project_root.joinpath(f'data/{_id}.token').write_text(token)
+                token_file.write_text(token)
                 farmer = LokFarmer(token, captcha_solver_config)
         else:
             # No token file exists, prompt user for initial token
             token = input("Please enter x-token: ")
-            _id = lokbot.util.decode_jwt(token).get('_id')
-            # Save the token to permanent file
-            project_root.joinpath(f'data/{_id}.token').write_text(token)
+            token_file.write_text(token)
             farmer = LokFarmer(token, captcha_solver_config)
     else:
-        # Token provided via command line, save it to permanent file
-        _id = lokbot.util.decode_jwt(token).get('_id')
-        project_root.joinpath(f'data/{_id}.token').write_text(token)
+        # Token provided via command line, save it to /data/token
+        project_root.joinpath('data/token').write_text(token)
         farmer = LokFarmer(token, captcha_solver_config)
 
     try:
