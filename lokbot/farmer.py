@@ -74,18 +74,25 @@ class LokFarmer:
         self.token = token
         self.api = LokBotApi(token, captcha_solver_config, self._request_callback)
 
-        auth_res = self.api.auth_connect({"deviceInfo": {"build": "global"}})
-        self.api.protected_api_list = json.loads(base64.b64decode(auth_res.get('lstProtect')).decode())
-        self.api.protected_api_list = [str(api).split('/api/').pop() for api in self.api.protected_api_list]
-        logger.debug(f'protected_api_list: {self.api.protected_api_list}')
-        self.api.xor_password = json.loads(base64.b64decode(auth_res.get('regionHash')).decode()).split('-')[1]
-        logger.debug(f'xor_password: {self.api.xor_password}')
-        self.token = auth_res.get('token')
-        self._id = lokbot.util.decode_jwt(token).get('_id')
-        project_root.joinpath(f'data/{self._id}.token').write_text(self.token)
+        try:
+            auth_res = self.api.auth_connect({"deviceInfo": {"build": "global"}})
+            self.api.protected_api_list = json.loads(base64.b64decode(auth_res.get('lstProtect')).decode())
+            self.api.protected_api_list = [str(api).split('/api/').pop() for api in self.api.protected_api_list]
+            logger.debug(f'protected_api_list: {self.api.protected_api_list}')
+            self.api.xor_password = json.loads(base64.b64decode(auth_res.get('regionHash')).decode()).split('-')[1]
+            logger.debug(f'xor_password: {self.api.xor_password}')
+            self.token = auth_res.get('token')
+            self._id = lokbot.util.decode_jwt(token).get('_id')
+            project_root.joinpath(f'data/{self._id}.token').write_text(self.token)
 
-        self.kingdom_enter = self.api.kingdom_enter()
-        self.alliance_id = self.kingdom_enter.get('kingdom', {}).get('allianceId')
+            self.kingdom_enter = self.api.kingdom_enter()
+            self.alliance_id = self.kingdom_enter.get('kingdom', {}).get('allianceId')
+        except FatalApiException as e:
+            logger.error(f"Failed to initialize LokFarmer: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during LokFarmer initialization: {e}")
+            raise
 
         # Get device_info from config with validation
         auth_config = config.get('auth')
@@ -479,13 +486,28 @@ class LokFarmer:
 
         nearby_zone_ids = neighbors(self._get_zone_array(), radius, idx[0] + 1, idx[1] + 1)
         nearby_zone_ids = [item.item() for sublist in nearby_zone_ids for item in sublist if item != 0]
+        
+        # Calculate distances and sort by proximity to player
+        zone_distances = []
+        for zone_id in nearby_zone_ids:
+            # Convert zone_id back to coordinates (center of zone)
+            zone_x = (zone_id % 64) * 32 + 16  # Center X coordinate of zone
+            zone_y = (zone_id // 64) * 32 + 16  # Center Y coordinate of zone
+            distance = self._calc_distance([0, x, y], [0, zone_x, zone_y])
+            zone_distances.append((zone_id, distance))
+        
+        # Sort by distance (closest first)
+        zone_distances.sort(key=lambda x: x[1])
+        sorted_zone_ids = [zone_id for zone_id, _ in zone_distances]
+        
         # TODO: Remove this after testing
         logger.info("-" * 50)
         logger.warning(f'current_zone_id: {current_zone_id}')
-        logger.warning(f'nearby_zone_ids: {nearby_zone_ids}')
+        logger.warning(f'nearby_zone_ids: {sorted_zone_ids[:10]}')  # Show first 10 for brevity
+        logger.warning(f'distances: {[d for _, d in zone_distances[:10]]}')  # Show distances
         logger.info("-" * 50)
         
-        return nearby_zone_ids
+        return sorted_zone_ids
 
     def _update_march_limit(self):
         troops = self.api.kingdom_profile_troops().get('troops')
@@ -515,6 +537,7 @@ class LokFarmer:
             data['dragoId'] = drago_id
 
         res = self.api.field_march_start(data)
+        logger.info(f'start_march: {res}')
 
         new_task = res.get('newTask')
         new_task['endTime'] = new_task['expectedEnded']
@@ -646,166 +669,307 @@ class LokFarmer:
         websocket connection of the kingdom
         :return:
         """
-        url = self.kingdom_enter.get('networks').get('kingdoms')[0]
+        try:
+            url = self.kingdom_enter.get('networks').get('kingdoms')[0]
 
-        sio = socketio.Client(reconnection=False, logger=sock_logger, engineio_logger=sock_logger)
+            sio = socketio.Client(reconnection=False, logger=sock_logger, engineio_logger=sock_logger)
 
-        @sio.on('/building/update')
-        def on_building_update(data):
-            logger.debug(data)
-            self._update_kingdom_enter_building(data)
+            @sio.on('/building/update')
+            def on_building_update(data):
+                logger.debug(data)
+                self._update_kingdom_enter_building(data)
 
-        @sio.on('/resource/upgrade')
-        def on_resource_update(data):
-            logger.debug(data)
-            self.resources[data.get('resourceIdx')] = data.get('value')
+            @sio.on('/resource/upgrade')
+            def on_resource_update(data):
+                logger.debug(data)
+                self.resources[data.get('resourceIdx')] = data.get('value')
 
-        @sio.on('/buff/list')
-        def on_buff_list(data):
-            logger.debug(f'on_buff_list: {data}')
+            @sio.on('/buff/list')
+            def on_buff_list(data):
+                logger.debug(f'on_buff_list: {data}')
 
-            self.has_additional_building_queue = len([
-                item for item in data if item.get('param', {}).get('itemCode') == ITEM_CODE_GOLDEN_HAMMER
-            ]) > 0
+                self.has_additional_building_queue = len([
+                    item for item in data if item.get('param', {}).get('itemCode') == ITEM_CODE_GOLDEN_HAMMER
+                ]) > 0
 
-            while self.started_at + 10 > time.time():
-                logger.info(f'started at {arrow.get(self.started_at).humanize()}, wait 10 seconds to activate buff')
-                time.sleep(4)
+                while self.started_at + 10 > time.time():
+                    logger.info(f'started at {arrow.get(self.started_at).humanize()}, wait 10 seconds to activate buff')
+                    time.sleep(4)
 
-            item_list = self.api.item_list().get('items')
+                item_list = self.api.item_list().get('items')
 
-            for buff_type, item_code_list in USABLE_BOOST_CODE_MAP.items():
-                already_activated = [item for item in data if item.get('param', {}).get('itemCode') in item_code_list]
+                for buff_type, item_code_list in USABLE_BOOST_CODE_MAP.items():
+                    already_activated = [item for item in data if item.get('param', {}).get('itemCode') in item_code_list]
 
-                if already_activated:
-                    continue
+                    if already_activated:
+                        continue
 
-                item_in_inventory = [item for item in item_list if item.get('code') in item_code_list]
+                    item_in_inventory = [item for item in item_list if item.get('code') in item_code_list]
 
-                if not item_in_inventory:
-                    continue
+                    if not item_in_inventory:
+                        continue
 
-                if self.buff_item_use_lock.locked():
+                    if self.buff_item_use_lock.locked():
+                        return
+
+                    with self.buff_item_use_lock:
+                        code = item_in_inventory[0].get('code')
+                        logger.info(f'activating buff: {buff_type}, code: {code}')
+                        self.api.item_use(code)
+
+                        if code == ITEM_CODE_GOLDEN_HAMMER:
+                            self.has_additional_building_queue = True
+
+            @sio.on('/alliance/rally/new')
+            def on_alliance_rally_new(data):
+                logger.debug(data)
+                code = data.get('code')
+                if code not in join_rally_code_list:
+                    logger.info(f'ignore rally: {code}')
                     return
+                # battles = self.api.alliance_battle_list_v2().get('battles')
+                # TODO: what does `state` mean?
 
-                with self.buff_item_use_lock:
-                    code = item_in_inventory[0].get('code')
-                    logger.info(f'activating buff: {buff_type}, code: {code}')
-                    self.api.item_use(code)
+            @sio.on('/task/update')
+            def on_task_update(data):
+                logger.debug(data)
+                if data.get('status') == STATUS_FINISHED:
+                    if data.get('code') in (TASK_CODE_SILVER_HAMMER, TASK_CODE_GOLD_HAMMER):
+                        self.building_queue_available.set()
 
-                    if code == ITEM_CODE_GOLDEN_HAMMER:
-                        self.has_additional_building_queue = True
+                if data.get('status') == STATUS_CLAIMED:
+                    if data.get('code') == TASK_CODE_ACADEMY:
+                        self.research_queue_available.set()
+                    if data.get('code') == TASK_CODE_CAMP:
+                        self.train_queue_available.set()
 
-        @sio.on('/alliance/rally/new')
-        def on_alliance_rally_new(data):
-            logger.debug(data)
-            code = data.get('code')
-            if code not in join_rally_code_list:
-                logger.info(f'ignore rally: {code}')
-                return
-            # battles = self.api.alliance_battle_list_v2().get('battles')
-            # TODO: what does `state` mean?
+            sio.connect(f'{url}?token={self.token}', transports=["websocket"], headers=ws_headers)
+            sio.emit('/kingdom/enter', {'token': self.token})
 
-        @sio.on('/task/update')
-        def on_task_update(data):
-            logger.debug(data)
-            if data.get('status') == STATUS_FINISHED:
-                if data.get('code') in (TASK_CODE_SILVER_HAMMER, TASK_CODE_GOLD_HAMMER):
-                    self.building_queue_available.set()
+            sio.wait()
+            logger.warning('sock_thread disconnected, reconnecting')
+            raise tenacity.TryAgain()
+        except FatalApiException as e:
+            logger.error(f"sock_thread fatal error: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"sock_thread unexpected error: {e}")
+            raise
 
-            if data.get('status') == STATUS_CLAIMED:
-                if data.get('code') == TASK_CODE_ACADEMY:
-                    self.research_queue_available.set()
-                if data.get('code') == TASK_CODE_CAMP:
-                    self.train_queue_available.set()
 
-        sio.connect(f'{url}?token={self.token}', transports=["websocket"], headers=ws_headers)
-        sio.emit('/kingdom/enter', {'token': self.token})
-
-        sio.wait()
-        logger.warning('sock_thread disconnected, reconnecting')
-        raise tenacity.TryAgain()
-
-    @tenacity.retry(
-        wait=tenacity.wait_random_exponential(multiplier=1, max=60),
-        retry=tenacity.retry_if_not_exception_type(FatalApiException),
-        reraise=True
-    )
-    def socf_thread(self, radius, targets, share_to=None):
+    def socf_thread(self, radius, targets, share_to=None, max_distance=100):
         """
         websocket connection of the field
         :return:
         """
-        while self.api.last_requested_at + 16 > time.time():
-            # if last request is less than 16 seconds ago, wait
-            # when we are in the field, we should not be doing anything else
-            logger.info(f'last requested at {arrow.get(self.api.last_requested_at).humanize()}, waiting...')
-            time.sleep(4)
+        try:
+            while self.api.last_requested_at + 16 > time.time():
+                # if last request is less than 16 seconds ago, wait
+                # when we are in the field, we should not be doing anything else
+                logger.info(f'last requested at {arrow.get(self.api.last_requested_at).humanize()}, waiting...')
+                time.sleep(4)
 
-        self._update_march_limit()
-
-        while self._is_march_limit_exceeded():
-            nearest_end_time = sorted(
-                self.troop_queue,
-                key=lambda x: x.get('endTime') if x.get('endTime') else '9999-99-99T99:99:99.999Z'
-            )[0].get('endTime')
-            seconds = self.calc_time_diff_in_seconds(nearest_end_time)
-            logger.info(f'_is_march_limit_exceeded: wait {seconds} seconds')
-            time.sleep(seconds)
             self._update_march_limit()
 
-        self.socf_entered = False
-        self.socf_world_id = self.kingdom_enter.get('kingdom').get('worldId')
-        url = self.kingdom_enter.get('networks').get('fields')[0]
-        from_loc = self.kingdom_enter.get('kingdom').get('loc')
+            while self._is_march_limit_exceeded():
+                nearest_end_time = sorted(
+                    self.troop_queue,
+                    key=lambda x: x.get('endTime') if x.get('endTime') else '9999-99-99T99:99:99.999Z'
+                )[0].get('endTime')
+                seconds = self.calc_time_diff_in_seconds(nearest_end_time)
+                logger.info(f'_is_march_limit_exceeded: wait {seconds} seconds')
+                time.sleep(seconds)
+                self._update_march_limit()
 
-        # Always recalculate zones to ensure proper sorting each run
-        logger.info('getting nearest zones')
-        self.zones = self._get_nearest_zone_ng(from_loc[1], from_loc[2], radius)
+            self.socf_entered = False
+            self.socf_world_id = self.kingdom_enter.get('kingdom').get('worldId')
+            url = self.kingdom_enter.get('networks').get('fields')[0]
+            from_loc = self.kingdom_enter.get('kingdom').get('loc')
 
-        sio = socketio.Client(reconnection=False, logger=socf_logger, engineio_logger=socf_logger)
-
-        @sio.on('/field/objects/v4')
-        def on_field_objects(data):
-            packs = data.get('packs')
-            gzip_decompress = gzip.decompress(bytearray(packs))
-            data_decoded = self.api.b64xor_dec(gzip_decompress)
-            objects = data_decoded.get('objects')
+            # Always recalculate zones to ensure proper sorting each run
+            logger.info('getting nearest zones')
+            self.zones = self._get_nearest_zone_ng(from_loc[1], from_loc[2], radius)
+            
+            # Initialize candidate collection for distance-based sorting
+            all_candidates = []
             target_code_set = set([target['code'] for target in targets])
 
-            logger.warning(f'Processing {len(objects)} objects')
-            
-            ignored_fields = []
-            for each_obj in objects:
-                if self._is_march_limit_exceeded():
-                    continue
+            sio = socketio.Client(reconnection=False, logger=socf_logger, engineio_logger=socf_logger)
 
+            @sio.on('/field/objects/v4')
+            def on_field_objects(data):
+                packs = data.get('packs')
+                gzip_decompress = gzip.decompress(bytearray(packs))
+                data_decoded = self.api.b64xor_dec(gzip_decompress)
+                objects = data_decoded.get('objects')
+
+                logger.warning(f'Collecting {len(objects)} objects as candidates')
+                
+                for each_obj in objects:
+                    code = each_obj.get('code')
+                    level = each_obj.get('level')
+                    loc = each_obj.get('loc')
+
+                    # Check if this object matches our target criteria
+                    level_whitelist = [target['level'] for target in targets if target['code'] == code]
+                    if not level_whitelist:
+                        # not the one we are looking for
+                        continue
+
+                    # Check dragon soul cavern requirements
+                    if code == OBJECT_CODE_DRAGON_SOUL_CAVERN:
+                        if self.drago_action_point < 1:
+                            logger.info(f'no_drago_action_point, ignore: {each_obj}')
+                            continue
+                        if not self.available_dragos:
+                            logger.info(f'not_available_drago, ignore: {each_obj}')
+                            continue
+
+                    # Check level requirements
+                    level_whitelist = level_whitelist[0]
+                    if level_whitelist and level not in level_whitelist:
+                        continue
+
+                    # Check if object type is in our target list
+                    if code not in target_code_set:
+                        continue
+
+                    # Add to candidates list for later distance-based processing
+                    all_candidates.append(each_obj)
+
+                logger.info(f'Collected {len(all_candidates)} candidates from this zone')
+                self.field_object_processed = True
+
+            @sio.on('/field/enter/v3')
+            def on_field_enter(data):
+                data_decoded = self.api.b64xor_dec(data)
+                logger.debug(data_decoded)
+                self.socf_world_id = data_decoded.get('loc')[0]  # in case of cvc event world map
+
+                # knock
+                sio.emit('/zone/leave/list/v2', {'world': self.socf_world_id, 'zones': '[]'})
+                default_zones = '[0,64,1,65]'
+                sio.emit('/zone/enter/list/v4', self.api.b64xor_enc({'world': self.socf_world_id, 'zones': default_zones}))
+                sio.emit('/zone/leave/list/v2', {'world': self.socf_world_id, 'zones': default_zones})
+
+                self.socf_entered = True
+
+            sio.connect(f'{url}?token={self.token}', transports=["websocket"], headers=ws_headers)
+            logger.debug(f'entering field: {self.zones}')
+            sio.emit('/field/enter/v3', self.api.b64xor_enc({'token': self.token}))
+
+            while not self.socf_entered:
+                time.sleep(1)
+
+            step = 9
+            grace = 7  # 9 times enter-leave action will cause ban
+            index = 0
+            while self.zones:
+                if index >= grace:
+                    logger.info('socf_thread grace exceeded, break')
+                    break
+
+                index += 1
+                zone_ids = []
+                for _ in range(step):
+                    if not self.zones:
+                        break
+
+                    zone_ids.append(self.zones.pop(0))
+
+                if len(zone_ids) < step:
+                    logger.info(f'len(zone_ids) < {step}, break')
+                    self.zones = []
+                    break
+
+                if not sio.connected:
+                    logger.warning('socf_thread disconnected, reconnecting')
+                    raise tenacity.TryAgain()
+
+                message = {'world': self.socf_world_id, 'zones': json.dumps(zone_ids, separators=(',', ':'))}
+                encoded_message = self.api.b64xor_enc(message)
+
+                sio.emit('/zone/enter/list/v4', encoded_message)
+                self.field_object_processed = False
+                logger.debug(f'entering zone: {zone_ids} and waiting for processing')
+                while not self.field_object_processed:
+                    time.sleep(1)
+                sio.emit('/zone/leave/list/v2', message)
+
+            logger.info('a loop is finished')
+            
+            # Process collected candidates with distance-based sorting
+            logger.info(f'Processing {len(all_candidates)} total candidates')
+            
+            # Calculate distances and filter by max_distance
+            candidates_with_distance = []
+            for candidate in all_candidates:
+                loc = candidate.get('loc')
+                distance = self._calc_distance(from_loc, loc)
+                
+                if distance <= max_distance:
+                    candidates_with_distance.append((candidate, distance))
+                else:
+                    logger.debug(f'Filtered out distant object at {loc} (distance: {distance})')
+            
+            # Sort candidates by distance (closest first)
+            candidates_with_distance.sort(key=lambda x: x[1])
+            sorted_candidates = [candidate for candidate, _ in candidates_with_distance]
+            
+            logger.info(f'Found {len(sorted_candidates)} candidates within max_distance of {max_distance}')
+            
+            # Update march limit before processing
+            self._update_march_limit()
+            
+            # Limit candidates to process to avoid excessive API calls
+            # Only process up to 3x the march limit to account for failed attempts
+            max_candidates_to_process = min(len(sorted_candidates), self.march_limit * 3)
+            if len(sorted_candidates) > max_candidates_to_process:
+                logger.info(f'Limiting processing to {max_candidates_to_process} candidates (march limit: {self.march_limit})')
+                sorted_candidates = sorted_candidates[:max_candidates_to_process]
+            
+            # Process sorted candidates until march limit is reached
+            ignored_fields = []
+            marches_sent = 0
+            
+            for i, each_obj in enumerate(sorted_candidates):
+                # Check march limit BEFORE making any API calls
+                if self._is_march_limit_exceeded():
+                    logger.info(f'March limit exceeded ({marches_sent} marches sent), stopping processing')
+                    break
+                
                 code = each_obj.get('code')
                 level = each_obj.get('level')
                 loc = each_obj.get('loc')
-
-                level_whitelist = [target['level'] for target in targets if target['code'] == code]
-                if not level_whitelist:
-                    # not the one we are looking for
+                
+                # Calculate and log distance for this object
+                distance = self._calc_distance(from_loc, loc)
+                logger.info(f'Processing {code}({level}) at {loc} (distance: {distance}) - candidate {i+1}/{len(sorted_candidates)}')
+                
+                # Only proceed if this object type is in our target list
+                if code not in target_code_set:
+                    logger.debug(f'Skipping {code} - not in target list')
                     continue
-
-
-                if code == OBJECT_CODE_DRAGON_SOUL_CAVERN:
-                    if self.drago_action_point < 1:
-                        logger.info(f'no_drago_action_point, ignore: {each_obj}')
-                        continue
-                    if not self.available_dragos:
-                        logger.info(f'not_available_drago, ignore: {each_obj}')
-                        continue
-
-                level_whitelist = level_whitelist[0]
-                if level_whitelist and level not in level_whitelist:
-                    ignored_fields.append(each_obj)
-                    continue
-
+                
                 res = False
                 try:
+                    # Pre-check: Only call march methods for objects we're actually going to march to
+                    # This avoids unnecessary API calls to field/march/info
                     if code in set(OBJECT_MINE_CODE_LIST).intersection(target_code_set):
+                        # Additional pre-checks before making API calls
+                        if each_obj.get('code') == OBJECT_CODE_CRYSTAL_MINE and self.level < 11:
+                            logger.debug(f'Skipping crystal mine - level {self.level} < 11')
+                            continue
+                        
+                        # Check dragon soul cavern requirements before API call
+                        if each_obj.get('code') == OBJECT_CODE_DRAGON_SOUL_CAVERN:
+                            if self.drago_action_point < 1:
+                                logger.debug(f'Skipping dragon soul cavern - no action points')
+                                continue
+                            if not self.available_dragos:
+                                logger.debug(f'Skipping dragon soul cavern - no available dragons')
+                                continue
+                        
                         res = self._on_field_objects_gather(each_obj)
 
                     if code in set(OBJECT_MONSTER_CODE_LIST).intersection(target_code_set):
@@ -816,76 +980,39 @@ class LokFarmer:
                             'no_drago_action_point', 'no_drago', 'exceed_crystal_daily_quota',
                             'not_available_drago'
                     ):
-                        logger.warning(f'on_field_objects: {error_code}, skip')
-                        self.field_object_processed = True
-                        return
+                        logger.warning(f'Processing candidate: {error_code}, skip')
+                        continue
                     raise
+                except Exception as e:
+                    logger.error(f'Unexpected error processing candidate {each_obj}: {e}')
+                    # Break on persistent errors to prevent infinite loops
+                    if '403' in str(e) or 'rate limit' in str(e).lower():
+                        logger.error('Rate limit detected, stopping processing to prevent infinite loop')
+                        break
+                    continue
                 else:
                     if res is True:
-                        logger.info(f'march_started {code}({level}): {each_obj}')
-
-            logger.info(f'Items ignored: {", ".join([each.get("loc") for each in ignored_fields])}')
-            self.field_object_processed = True
-
-        @sio.on('/field/enter/v3')
-        def on_field_enter(data):
-            data_decoded = self.api.b64xor_dec(data)
-            logger.debug(data_decoded)
-            self.socf_world_id = data_decoded.get('loc')[0]  # in case of cvc event world map
-
-            # knock
-            sio.emit('/zone/leave/list/v2', {'world': self.socf_world_id, 'zones': '[]'})
-            default_zones = '[0,64,1,65]'
-            sio.emit('/zone/enter/list/v4', self.api.b64xor_enc({'world': self.socf_world_id, 'zones': default_zones}))
-            sio.emit('/zone/leave/list/v2', {'world': self.socf_world_id, 'zones': default_zones})
-
-            self.socf_entered = True
-
-        sio.connect(f'{url}?token={self.token}', transports=["websocket"], headers=ws_headers)
-        logger.debug(f'entering field: {self.zones}')
-        sio.emit('/field/enter/v3', self.api.b64xor_enc({'token': self.token}))
-
-        while not self.socf_entered:
-            time.sleep(1)
-
-        step = 9
-        grace = 7  # 9 times enter-leave action will cause ban
-        index = 0
-        while self.zones:
-            if index >= grace:
-                logger.info('socf_thread grace exceeded, break')
-                break
-
-            index += 1
-            zone_ids = []
-            for _ in range(step):
-                if not self.zones:
-                    break
-
-                zone_ids.append(self.zones.pop(0))
-
-            if len(zone_ids) < step:
-                logger.info(f'len(zone_ids) < {step}, break')
-                self.zones = []
-                break
-
-            if not sio.connected:
-                logger.warning('socf_thread disconnected, reconnecting')
-                raise tenacity.TryAgain()
-
-            message = {'world': self.socf_world_id, 'zones': json.dumps(zone_ids, separators=(',', ':'))}
-            encoded_message = self.api.b64xor_enc(message)
-
-            sio.emit('/zone/enter/list/v4', encoded_message)
-            self.field_object_processed = False
-            logger.debug(f'entering zone: {zone_ids} and waiting for processing')
-            while not self.field_object_processed:
-                time.sleep(1)
-            sio.emit('/zone/leave/list/v2', message)
-
-        logger.info('a loop is finished')
-        sio.disconnect()
-        sio.wait()
+                        marches_sent += 1
+                        logger.info(f'march_started {code}({level}): {each_obj} (march #{marches_sent})')
+                        # Add delay after successful march to avoid rate limiting
+                        time.sleep(0.5)
+                    else:
+                        ignored_fields.append(each_obj)
+                
+                # Add small delay between candidates to avoid rate limiting
+                if i < len(sorted_candidates) - 1:  # Don't delay after last candidate
+                    time.sleep(0.3)
+            
+            logger.info(f'Items ignored: {", ".join([str(each.get("loc")) for each in ignored_fields])}')
+            
+            sio.disconnect()
+            sio.wait()
+        except FatalApiException as e:
+            logger.error(f"socf_thread fatal error: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"socf_thread unexpected error: {e}")
+            raise
 
     @tenacity.retry(
         wait=tenacity.wait_random_exponential(multiplier=1, max=60),
@@ -897,93 +1024,114 @@ class LokFarmer:
         websocket connection of the chat
         :return:
         """
-        url = self.kingdom_enter.get('networks').get('chats')[0]
+        try:
+            url = self.kingdom_enter.get('networks').get('chats')[0]
 
-        sio = socketio.Client(reconnection=False, logger=socc_logger, engineio_logger=socc_logger)
+            sio = socketio.Client(reconnection=False, logger=socc_logger, engineio_logger=socc_logger)
 
-        # no token needed in query string, yet
-        sio.connect(url, transports=["websocket"], headers=ws_headers)
-        sio.emit('/chat/enter', {'token': self.token})
+            # no token needed in query string, yet
+            sio.connect(url, transports=["websocket"], headers=ws_headers)
+            sio.emit('/chat/enter', {'token': self.token})
 
-        sio.wait()
-        logger.warning('socc_thread disconnected, reconnecting')
-        raise tenacity.TryAgain()
+            sio.wait()
+            logger.warning('socc_thread disconnected, reconnecting')
+            raise tenacity.TryAgain()
+        except FatalApiException as e:
+            logger.error(f"socc_thread fatal error: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"socc_thread unexpected error: {e}")
+            raise
 
     def harvester(self):
         """
         Harvest resources
         :return:
         """
-        buildings = self.kingdom_enter.get('kingdom', {}).get('buildings', [])
+        try:
+            buildings = self.kingdom_enter.get('kingdom', {}).get('buildings', [])
 
-        random.shuffle(buildings)
+            random.shuffle(buildings)
 
-        harvested_code = set()
-        for building in buildings:
-            code = building.get('code')
-            position = building.get('position')
+            harvested_code = set()
+            for building in buildings:
+                code = building.get('code')
+                position = building.get('position')
 
-            if code not in HARVESTABLE_CODE:
-                continue
+                if code not in HARVESTABLE_CODE:
+                    continue
 
-            # Each type only needs to be harvested once, will automatically harvest all resources of that type
-            if code in harvested_code:
-                continue
+                # Each type only needs to be harvested once, will automatically harvest all resources of that type
+                if code in harvested_code:
+                    continue
 
-            harvested_code.add(code)
+                harvested_code.add(code)
 
-            self.api.kingdom_resource_harvest(position)
+                self.api.kingdom_resource_harvest(position)
+        except FatalApiException as e:
+            logger.error(f"Fatal error in harvester: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in harvester: {e}")
+            raise
 
     def quest_monitor_thread(self):
         """
         Quest monitoring
         :return:
         """
-        quest_list = self.api.quest_list()
+        try:
+            quest_list = self.api.quest_list()
 
-        # main quest(currently only one)
-        [self.api.quest_claim(q) for q in quest_list.get('mainQuests') if q.get('status') == STATUS_FINISHED]
+            # main quest(currently only one)
+            [self.api.quest_claim(q) for q in quest_list.get('mainQuests') if q.get('status') == STATUS_FINISHED]
 
-        # side quest(max 5)
-        if len([self.api.quest_claim(q) for q in quest_list.get('sideQuests') if
-                q.get('status') == STATUS_FINISHED]) >= 5:
-            # If all five are completed, then turn page
-            threading.Thread(target=self.quest_monitor_thread).start()
+            # side quest(max 5)
+            if len([self.api.quest_claim(q) for q in quest_list.get('sideQuests') if
+                    q.get('status') == STATUS_FINISHED]) >= 5:
+                # If all five are completed, then turn page
+                threading.Thread(target=self.quest_monitor_thread).start()
+                return
+
+            quest_list_daily = self.api.quest_list_daily().get('dailyQuest')
+
+            # daily quest(max 5)
+            if len([self.api.quest_claim_daily(q) for q in quest_list_daily.get('quests') if
+                    q.get('status') == STATUS_FINISHED]) >= 5:
+                # If all five are completed, then turn page
+                threading.Thread(target=self.quest_monitor_thread).start()
+                return
+
+            # daily quest reward
+            [self.api.quest_claim_daily_level(q) for q in quest_list_daily.get('rewards') if
+             q.get('status') == STATUS_FINISHED]
+
+            # event
+            event_list = self.api.event_list()
+            event_has_red_dot = [each for each in event_list.get('events') if each.get('reddot') > 0]
+            for event in event_has_red_dot:
+                event_info = self.api.event_info(event.get('_id'))
+                finished_code = [
+                    each.get('code') for each in event_info.get('eventKingdom').get('events')
+                    if each.get('status') == STATUS_FINISHED
+                ]
+
+                if not finished_code:
+                    continue
+
+                [self.api.event_claim(
+                    event_info.get('event').get('_id'), each.get('_id'), each.get('code')
+                ) for each in event_info.get('event').get('events') if each.get('code') in finished_code]
+
+            logger.info('quest_monitor: done, sleep for 1h')
+            threading.Timer(3600, self.quest_monitor_thread).start()
             return
-
-        quest_list_daily = self.api.quest_list_daily().get('dailyQuest')
-
-        # daily quest(max 5)
-        if len([self.api.quest_claim_daily(q) for q in quest_list_daily.get('quests') if
-                q.get('status') == STATUS_FINISHED]) >= 5:
-            # If all five are completed, then turn page
-            threading.Thread(target=self.quest_monitor_thread).start()
-            return
-
-        # daily quest reward
-        [self.api.quest_claim_daily_level(q) for q in quest_list_daily.get('rewards') if
-         q.get('status') == STATUS_FINISHED]
-
-        # event
-        event_list = self.api.event_list()
-        event_has_red_dot = [each for each in event_list.get('events') if each.get('reddot') > 0]
-        for event in event_has_red_dot:
-            event_info = self.api.event_info(event.get('_id'))
-            finished_code = [
-                each.get('code') for each in event_info.get('eventKingdom').get('events')
-                if each.get('status') == STATUS_FINISHED
-            ]
-
-            if not finished_code:
-                continue
-
-            [self.api.event_claim(
-                event_info.get('event').get('_id'), each.get('_id'), each.get('code')
-            ) for each in event_info.get('event').get('events') if each.get('code') in finished_code]
-
-        logger.info('quest_monitor: done, sleep for 1h')
-        threading.Timer(3600, self.quest_monitor_thread).start()
-        return
+        except FatalApiException as e:
+            logger.error(f"Fatal error in quest_monitor_thread: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in quest_monitor_thread: {e}")
+            raise
 
     def _building_farmer_worker(self, speedup=False):
         buildings = self.kingdom_enter.get('kingdom', {}).get('buildings', [])
@@ -1034,20 +1182,27 @@ class LokFarmer:
         :param speedup:
         :return:
         """
-        self.kingdom_tasks = self.api.kingdom_task_all().get('kingdomTasks', [])
+        try:
+            self.kingdom_tasks = self.api.kingdom_task_all().get('kingdomTasks', [])
 
-        silver_in_use = [t for t in self.kingdom_tasks if t.get('code') == TASK_CODE_SILVER_HAMMER]
-        gold_in_use = [t for t in self.kingdom_tasks if t.get('code') == TASK_CODE_GOLD_HAMMER]
+            silver_in_use = [t for t in self.kingdom_tasks if t.get('code') == TASK_CODE_SILVER_HAMMER]
+            gold_in_use = [t for t in self.kingdom_tasks if t.get('code') == TASK_CODE_GOLD_HAMMER]
 
-        if not silver_in_use or (self.has_additional_building_queue and not gold_in_use):
-            if not self._building_farmer_worker(speedup):
-                logger.info(f'no building to upgrade, sleep for 2h')
-                threading.Timer(7200, self.building_farmer_thread).start()
-                return
+            if not silver_in_use or (self.has_additional_building_queue and not gold_in_use):
+                if not self._building_farmer_worker(speedup):
+                    logger.info(f'no building to upgrade, sleep for 2h')
+                    threading.Timer(7200, self.building_farmer_thread).start()
+                    return
 
-        self.building_queue_available.wait()  # wait for building queue available from `sock_thread`
-        self.building_queue_available.clear()
-        threading.Thread(target=self.building_farmer_thread, args=[speedup]).start()
+            self.building_queue_available.wait()  # wait for building queue available from `sock_thread`
+            self.building_queue_available.clear()
+            threading.Thread(target=self.building_farmer_thread, args=[speedup]).start()
+        except FatalApiException as e:
+            logger.error(f"Fatal error in building_farmer_thread: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in building_farmer_thread: {e}")
+            raise
 
     def academy_farmer_thread(self, to_max_level=False, speedup=False):
         """
@@ -1056,52 +1211,59 @@ class LokFarmer:
         :param speedup:
         :return:
         """
-        self.kingdom_tasks = self.api.kingdom_task_all().get('kingdomTasks', [])
+        try:
+            self.kingdom_tasks = self.api.kingdom_task_all().get('kingdomTasks', [])
 
-        worker_used = [t for t in self.kingdom_tasks if t.get('code') == TASK_CODE_ACADEMY]
+            worker_used = [t for t in self.kingdom_tasks if t.get('code') == TASK_CODE_ACADEMY]
 
-        if worker_used:
-            if worker_used[0].get('status') != STATUS_CLAIMED:
-                self.research_queue_available.wait()  # wait for research queue available from `sock_thread`
-                self.research_queue_available.clear()
-                threading.Thread(target=self.academy_farmer_thread, args=[to_max_level, speedup]).start()
-                return
+            if worker_used:
+                if worker_used[0].get('status') != STATUS_CLAIMED:
+                    self.research_queue_available.wait()  # wait for research queue available from `sock_thread`
+                    self.research_queue_available.clear()
+                    threading.Thread(target=self.academy_farmer_thread, args=[to_max_level, speedup]).start()
+                    return
 
-            # If completed, claim reward and continue
-            self.api.kingdom_task_claim(BUILDING_POSITION_MAP['academy'])
+                # If completed, claim reward and continue
+                self.api.kingdom_task_claim(BUILDING_POSITION_MAP['academy'])
 
-        exist_researches = self.api.kingdom_academy_research_list().get('researches', [])
-        buildings = self.kingdom_enter.get('kingdom', {}).get('buildings', [])
-        academy_level = [b for b in buildings if b.get('code') == BUILDING_CODE_MAP['academy']][0].get('level')
+            exist_researches = self.api.kingdom_academy_research_list().get('researches', [])
+            buildings = self.kingdom_enter.get('kingdom', {}).get('buildings', [])
+            academy_level = [b for b in buildings if b.get('code') == BUILDING_CODE_MAP['academy']][0].get('level')
 
-        for category_name, each_category in RESEARCH_CODE_MAP.items():
-            for research_name, research_code in each_category.items():
-                if not self._is_researchable(
-                        academy_level, category_name, research_name, exist_researches, to_max_level
-                ):
-                    continue
+            for category_name, each_category in RESEARCH_CODE_MAP.items():
+                for research_name, research_code in each_category.items():
+                    if not self._is_researchable(
+                            academy_level, category_name, research_name, exist_researches, to_max_level
+                    ):
+                        continue
 
-                try:
-                    res = self.api.kingdom_academy_research({'code': research_code})
-                except OtherException as error_code:
-                    if str(error_code) == 'not_enough_condition':
-                        logger.warning(f'category {category_name} reached max level')
-                        break
+                    try:
+                        res = self.api.kingdom_academy_research({'code': research_code})
+                    except OtherException as error_code:
+                        if str(error_code) == 'not_enough_condition':
+                            logger.warning(f'category {category_name} reached max level')
+                            break
 
-                    logger.info(f'research failed, try next one, current: {research_name}({research_code})')
-                    continue
+                        logger.info(f'research failed, try next one, current: {research_name}({research_code})')
+                        continue
 
-                if speedup:
-                    self.do_speedup(res.get('newTask').get('expectedEnded'), res.get('newTask').get('_id'), 'research')
+                    if speedup:
+                        self.do_speedup(res.get('newTask').get('expectedEnded'), res.get('newTask').get('_id'), 'research')
 
-                self.research_queue_available.wait()  # wait for research queue available from `sock_thread`
-                self.research_queue_available.clear()
-                threading.Thread(target=self.academy_farmer_thread, args=[to_max_level, speedup]).start()
-                return
+                    self.research_queue_available.wait()  # wait for research queue available from `sock_thread`
+                    self.research_queue_available.clear()
+                    threading.Thread(target=self.academy_farmer_thread, args=[to_max_level, speedup]).start()
+                    return
 
-        logger.info('academy_farmer: no research to do, sleep for 2h')
-        threading.Timer(2 * 3600, self.academy_farmer_thread, [to_max_level]).start()
-        return
+            logger.info('academy_farmer: no research to do, sleep for 2h')
+            threading.Timer(2 * 3600, self.academy_farmer_thread, [to_max_level]).start()
+            return
+        except FatalApiException as e:
+            logger.error(f"Fatal error in academy_farmer_thread: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in academy_farmer_thread: {e}")
+            raise
 
     def _troop_training_capacity(self):
         """
@@ -1146,53 +1308,60 @@ class LokFarmer:
         :param speedup:
         :return:
         """
-        while self.api.last_requested_at + 4 > time.time():
-            # attempt to prevent `insufficient_resources` due to race conditions
-            logger.info(f'last requested at {arrow.get(self.api.last_requested_at).humanize()}, waiting...')
-            time.sleep(4)
-
-        self.kingdom_tasks = self.api.kingdom_task_all().get('kingdomTasks', [])
-
-        worker_used = [t for t in self.kingdom_tasks if t.get('code') == TASK_CODE_CAMP]
-
-        troop_training_capacity = self._troop_training_capacity()
-
-        if worker_used:
-            if worker_used[0].get('status') == STATUS_CLAIMED:
-                self.api.kingdom_task_claim(self._random_choice_building(BUILDING_CODE_MAP['barrack'])['position'])
-                logger.info(f'train_troop: one loop completed, sleep for {interval} seconds')
-                threading.Timer(interval, self.train_troop_thread, [troop_code, speedup, interval]).start()
-                return
-
-            if worker_used[0].get('status') == STATUS_PENDING:
-                self.train_queue_available.wait()  # wait for train queue available from `sock_thread`
-                self.train_queue_available.clear()
-                threading.Thread(target=self.train_troop_thread, args=[troop_code, speedup, interval]).start()
-                return
-
-        # if there are not enough resources, train how much possible
-        total_troops_capacity_according_to_resources = self._total_troops_capacity_according_to_resources(troop_code)
-        if troop_training_capacity > total_troops_capacity_according_to_resources:
-            troop_training_capacity = total_troops_capacity_according_to_resources
-
-        if not troop_training_capacity:
-            logger.info('train_troop: no resource, sleep for 1h')
-            threading.Timer(3600, self.train_troop_thread, [troop_code, speedup, interval]).start()
-            return
-
         try:
-            res = self.api.train_troop(troop_code, troop_training_capacity)
-        except OtherException as error_code:
-            logger.info(f'train_troop: {error_code}, sleep for 1h')
-            threading.Timer(3600, self.train_troop_thread, [troop_code, speedup, interval]).start()
-            return
+            while self.api.last_requested_at + 4 > time.time():
+                # attempt to prevent `insufficient_resources` due to race conditions
+                logger.info(f'last requested at {arrow.get(self.api.last_requested_at).humanize()}, waiting...')
+                time.sleep(4)
 
-        if speedup:
-            self.do_speedup(res.get('newTask').get('expectedEnded'), res.get('newTask').get('_id'), 'train')
+            self.kingdom_tasks = self.api.kingdom_task_all().get('kingdomTasks', [])
 
-        self.train_queue_available.wait()  # wait for train queue available from `sock_thread`
-        self.train_queue_available.clear()
-        threading.Thread(target=self.train_troop_thread, args=[troop_code, speedup, interval]).start()
+            worker_used = [t for t in self.kingdom_tasks if t.get('code') == TASK_CODE_CAMP]
+
+            troop_training_capacity = self._troop_training_capacity()
+
+            if worker_used:
+                if worker_used[0].get('status') == STATUS_CLAIMED:
+                    self.api.kingdom_task_claim(self._random_choice_building(BUILDING_CODE_MAP['barrack'])['position'])
+                    logger.info(f'train_troop: one loop completed, sleep for {interval} seconds')
+                    threading.Timer(interval, self.train_troop_thread, [troop_code, speedup, interval]).start()
+                    return
+
+                if worker_used[0].get('status') == STATUS_PENDING:
+                    self.train_queue_available.wait()  # wait for train queue available from `sock_thread`
+                    self.train_queue_available.clear()
+                    threading.Thread(target=self.train_troop_thread, args=[troop_code, speedup, interval]).start()
+                    return
+
+            # if there are not enough resources, train how much possible
+            total_troops_capacity_according_to_resources = self._total_troops_capacity_according_to_resources(troop_code)
+            if troop_training_capacity > total_troops_capacity_according_to_resources:
+                troop_training_capacity = total_troops_capacity_according_to_resources
+
+            if not troop_training_capacity:
+                logger.info('train_troop: no resource, sleep for 1h')
+                threading.Timer(3600, self.train_troop_thread, [troop_code, speedup, interval]).start()
+                return
+
+            try:
+                res = self.api.train_troop(troop_code, troop_training_capacity)
+            except OtherException as error_code:
+                logger.info(f'train_troop: {error_code}, sleep for 1h')
+                threading.Timer(3600, self.train_troop_thread, [troop_code, speedup, interval]).start()
+                return
+
+            if speedup:
+                self.do_speedup(res.get('newTask').get('expectedEnded'), res.get('newTask').get('_id'), 'train')
+
+            self.train_queue_available.wait()  # wait for train queue available from `sock_thread`
+            self.train_queue_available.clear()
+            threading.Thread(target=self.train_troop_thread, args=[troop_code, speedup, interval]).start()
+        except FatalApiException as e:
+            logger.error(f"Fatal error in train_troop_thread: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in train_troop_thread: {e}")
+            raise
 
     def free_chest_farmer_thread(self, _type=0):
         """
@@ -1200,42 +1369,56 @@ class LokFarmer:
         :return:
         """
         try:
-            res = self.api.item_free_chest(_type)
-        except OtherException as error_code:
-            if str(error_code) == 'free_chest_not_yet':
-                logger.info('free_chest_farmer: free_chest_not_yet, sleep for 2h')
-                threading.Timer(2 * 3600, self.free_chest_farmer_thread).start()
-                return
+            try:
+                res = self.api.item_free_chest(_type)
+            except OtherException as error_code:
+                if str(error_code) == 'free_chest_not_yet':
+                    logger.info('free_chest_farmer: free_chest_not_yet, sleep for 2h')
+                    threading.Timer(2 * 3600, self.free_chest_farmer_thread).start()
+                    return
 
+                raise
+
+            next_dict = {
+                0: arrow.get(res.get('freeChest', {}).get('silver', {}).get('next')),
+                1: arrow.get(res.get('freeChest', {}).get('gold', {}).get('next')),
+                2: arrow.get(res.get('freeChest', {}).get('platinum', {}).get('next')),
+            }
+            next_type = min(next_dict, key=next_dict.get)
+
+            threading.Timer(
+                self.calc_time_diff_in_seconds(next_dict[next_type]),
+                self.free_chest_farmer_thread, [next_type]
+            ).start()
+        except FatalApiException as e:
+            logger.error(f"Fatal error in free_chest_farmer_thread: {e}")
             raise
-
-        next_dict = {
-            0: arrow.get(res.get('freeChest', {}).get('silver', {}).get('next')),
-            1: arrow.get(res.get('freeChest', {}).get('gold', {}).get('next')),
-            2: arrow.get(res.get('freeChest', {}).get('platinum', {}).get('next')),
-        }
-        next_type = min(next_dict, key=next_dict.get)
-
-        threading.Timer(
-            self.calc_time_diff_in_seconds(next_dict[next_type]),
-            self.free_chest_farmer_thread, [next_type]
-        ).start()
+        except Exception as e:
+            logger.error(f"Unexpected error in free_chest_farmer_thread: {e}")
+            raise
 
     def use_resource_in_item_list(self):
         """
 
         :return:
         """
-        item_list = self.api.item_list().get('items', [])
+        try:
+            item_list = self.api.item_list().get('items', [])
 
-        if not item_list:
-            return
+            if not item_list:
+                return
 
-        usable_item_list = filter(lambda x: x.get('code') in USABLE_ITEM_CODE_LIST, item_list)
+            usable_item_list = filter(lambda x: x.get('code') in USABLE_ITEM_CODE_LIST, item_list)
 
-        for each_item in usable_item_list:
-            self.api.item_use(each_item.get('code'), each_item.get('amount'))
-            time.sleep(random.randint(1, 3))
+            for each_item in usable_item_list:
+                self.api.item_use(each_item.get('code'), each_item.get('amount'))
+                time.sleep(random.randint(1, 3))
+        except FatalApiException as e:
+            logger.error(f"Fatal error in use_resource_in_item_list: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in use_resource_in_item_list: {e}")
+            raise
 
     def vip_chest_claim(self):
         """
@@ -1243,103 +1426,145 @@ class LokFarmer:
         daily
         :return:
         """
-        vip_info = self.api.kingdom_vip_info()
+        try:
+            vip_info = self.api.kingdom_vip_info()
 
-        if vip_info.get('vip', {}).get('isClaimed'):
-            return
+            if vip_info.get('vip', {}).get('isClaimed'):
+                return
 
-        self.api.kingdom_vip_claim()
+            self.api.kingdom_vip_claim()
+        except FatalApiException as e:
+            logger.error(f"Fatal error in vip_chest_claim: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in vip_chest_claim: {e}")
+            raise
 
     def alliance_farmer(self, gift_claim=True, help_all=True, research_donate=True, shop_auto_buy_item_code_list=None):
-        if not self.alliance_id:
-            return
+        try:
+            if not self.alliance_id:
+                return
 
-        if gift_claim:
-            self._alliance_gift_claim_all()
+            if gift_claim:
+                self._alliance_gift_claim_all()
 
-        if help_all:
-            self._alliance_help_all()
+            if help_all:
+                self._alliance_help_all()
 
-        if research_donate:
-            self._alliance_research_donate_all()
+            if research_donate:
+                self._alliance_research_donate_all()
 
-        if shop_auto_buy_item_code_list and type(shop_auto_buy_item_code_list) is list:
-            self._alliance_shop_autobuy(shop_auto_buy_item_code_list)
+            if shop_auto_buy_item_code_list and type(shop_auto_buy_item_code_list) is list:
+                self._alliance_shop_autobuy(shop_auto_buy_item_code_list)
+        except FatalApiException as e:
+            logger.error(f"Fatal error in alliance_farmer: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in alliance_farmer: {e}")
+            raise
 
     def caravan_farmer(self):
-        caravan = self.api.kingdom_caravan_list().get('caravan')
+        try:
+            caravan = self.api.kingdom_caravan_list().get('caravan')
 
-        if not caravan:
-            return
+            if not caravan:
+                return
 
-        for each_item in caravan.get('items', []):
-            if each_item.get('amount') < 1:
-                continue
+            for each_item in caravan.get('items', []):
+                if each_item.get('amount') < 1:
+                    continue
 
-            if each_item.get('code') not in BUYABLE_CARAVAN_ITEM_CODE_LIST:
-                continue
+                if each_item.get('code') not in BUYABLE_CARAVAN_ITEM_CODE_LIST:
+                    continue
 
-            if each_item.get('costItemCode') not in BUYABLE_CARAVAN_ITEM_CODE_LIST:
-                continue
+                if each_item.get('costItemCode') not in BUYABLE_CARAVAN_ITEM_CODE_LIST:
+                    continue
 
-            resource_index = lokbot.util.get_resource_index_by_item_code(each_item.get('costItemCode'))
+                resource_index = lokbot.util.get_resource_index_by_item_code(each_item.get('costItemCode'))
 
-            if resource_index == -1:
-                continue
+                if resource_index == -1:
+                    continue
 
-            if each_item.get('cost') > self.resources[resource_index]:
-                continue
+                if each_item.get('cost') > self.resources[resource_index]:
+                    continue
 
-            self.api.kingdom_caravan_buy(each_item.get('_id'))
+                self.api.kingdom_caravan_buy(each_item.get('_id'))
+        except FatalApiException as e:
+            logger.error(f"Fatal error in caravan_farmer: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in caravan_farmer: {e}")
+            raise
 
     def mail_claim(self):
-        self.api.mail_claim_all(1)  # report
-        time.sleep(random.randint(4, 6))
-        self.api.mail_claim_all(2)  # alliance
-        time.sleep(random.randint(4, 6))
-        self.api.mail_claim_all(3)  # system
+        try:
+            self.api.mail_claim_all(1)  # report
+            time.sleep(random.randint(4, 6))
+            self.api.mail_claim_all(2)  # alliance
+            time.sleep(random.randint(4, 6))
+            self.api.mail_claim_all(3)  # system
+        except FatalApiException as e:
+            logger.error(f"Fatal error in mail_claim: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in mail_claim: {e}")
+            raise
 
     def wall_repair(self):
-        wall_info = self.api.kingdom_wall_info()
+        try:
+            wall_info = self.api.kingdom_wall_info()
 
-        max_durability = wall_info.get('wall', {}).get('maxDurability')
-        durability = wall_info.get('wall', {}).get('durability')
-        last_repair_date = wall_info.get('wall', {}).get('lastRepairDate')
+            max_durability = wall_info.get('wall', {}).get('maxDurability')
+            durability = wall_info.get('wall', {}).get('durability')
+            last_repair_date = wall_info.get('wall', {}).get('lastRepairDate')
 
-        if not last_repair_date:
-            return
+            if not last_repair_date:
+                return
 
-        last_repair_date = arrow.get(last_repair_date)
-        last_repair_diff = arrow.utcnow() - last_repair_date
+            last_repair_date = arrow.get(last_repair_date)
+            last_repair_diff = arrow.utcnow() - last_repair_date
 
-        if durability >= max_durability:
-            return
+            if durability >= max_durability:
+                return
 
-        if int(last_repair_diff.total_seconds()) < 60 * 30:
-            # 30 minute interval
-            return
+            if int(last_repair_diff.total_seconds()) < 60 * 30:
+                # 30 minute interval
+                return
 
-        self.api.kingdom_wall_repair()
+            self.api.kingdom_wall_repair()
+        except FatalApiException as e:
+            logger.error(f"Fatal error in wall_repair: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in wall_repair: {e}")
+            raise
 
     def hospital_recover(self):
-        if self.hospital_recover_lock.locked():
-            logger.info('another hospital_recover is running, skip')
-            return
+        try:
+            if self.hospital_recover_lock.locked():
+                logger.info('another hospital_recover is running, skip')
+                return
 
-        with self.hospital_recover_lock:
-            wounded = self.api.kingdom_hospital_wounded().get('wounded', [])
+            with self.hospital_recover_lock:
+                wounded = self.api.kingdom_hospital_wounded().get('wounded', [])
 
-            estimated_end_time = None
-            for each_batch in wounded:
-                if estimated_end_time is None:
-                    estimated_end_time = arrow.get(each_batch[0].get('startTime'))
-                time_total = sum([each.get('time') for each in each_batch])
-                estimated_end_time = estimated_end_time.shift(seconds=time_total)
+                estimated_end_time = None
+                for each_batch in wounded:
+                    if estimated_end_time is None:
+                        estimated_end_time = arrow.get(each_batch[0].get('startTime'))
+                    time_total = sum([each.get('time') for each in each_batch])
+                    estimated_end_time = estimated_end_time.shift(seconds=time_total)
 
-            if estimated_end_time and estimated_end_time > arrow.utcnow():
-                self.do_speedup(estimated_end_time, 'dummy_task_id', 'recover')
+                if estimated_end_time and estimated_end_time > arrow.utcnow():
+                    self.do_speedup(estimated_end_time, 'dummy_task_id', 'recover')
 
-            self.api.kingdom_hospital_recover()
+                self.api.kingdom_hospital_recover()
+        except FatalApiException as e:
+            logger.error(f"Fatal error in hospital_recover: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in hospital_recover: {e}")
+            raise
 
     def keepalive_request(self):
         try:
@@ -1355,5 +1580,11 @@ class LokFarmer:
                 self.api.pkg_recommend,
                 self.api.pkg_list,
             )
+        except FatalApiException as e:
+            logger.error(f"Fatal error in keepalive_request: {e}")
+            raise
         except OtherException:
             pass
+        except Exception as e:
+            logger.error(f"Unexpected error in keepalive_request: {e}")
+            raise

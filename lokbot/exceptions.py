@@ -1,34 +1,49 @@
 class ApiException(Exception):
-    pass
+    def __str__(self):
+        return f"API Exception: {super().__str__() or 'Unknown API error'}"
 
 
 class RetryableApiException(ApiException):
-    pass
+    def __str__(self):
+        return f"Retryable API Exception: {super().__str__() or 'Request can be retried'}"
 
 
 class FatalApiException(ApiException):
-    pass
+    def __str__(self):
+        return f"Fatal API Exception: {super().__str__() or 'Critical error occurred'}"
 
 
 class NoAuthException(FatalApiException):
-    pass
+    def __str__(self):
+        return "Authentication failed: Invalid or expired token"
 
 
 class NeedCaptchaException(FatalApiException):
-    pass
+    def __str__(self):
+        return "Captcha required: Bot detection triggered"
 
 
 class NotOnlineException(FatalApiException):
-    pass
+    def __str__(self):
+        return "Not online: Account is not currently online or accessible"
 
 
 class OtherException(FatalApiException):
-    pass
+    def __init__(self, error_code=None):
+        super().__init__()
+        self.error_code = error_code
+    
+    def __str__(self):
+        if self.error_code:
+            return f"API Error: {self.error_code}"
+        return "Unknown API error occurred"
 
 
 class DuplicatedException(RetryableApiException):
-    pass
+    def __str__(self):
+        return "Request duplicated: Server-side rate limiter triggered"
 
 
 class ExceedLimitPacketException(RetryableApiException):
-    pass
+    def __str__(self):
+        return "Rate limit exceeded: Too many requests, waiting 1 hour"

@@ -8,7 +8,7 @@ import schedule
 import lokbot.util
 from lokbot import project_root, logger, config
 from lokbot.async_farmer import AsyncLokFarmer
-from lokbot.exceptions import NoAuthException
+from lokbot.exceptions import NoAuthException, FatalApiException
 from lokbot.farmer import LokFarmer
 
 
@@ -48,29 +48,69 @@ def main(token=None, captcha_solver_config=None):
     if captcha_solver_config is None:
         captcha_solver_config = {}
     
-    # Load token from config if not provided
+    # Load token from permanent token file
     if token is None:
-        token = config.get('auth', {}).get('x-token')
-        if not token:
+        # First, try to get user ID from any existing token file
+        _id = None
+        token_file = None
+        
+        # Look for existing token files in data directory
+        data_dir = project_root.joinpath('data')
+        if data_dir.exists():
+            for file_path in data_dir.glob('*.token'):
+                try:
+                    # Try to decode the token to get user ID
+                    token_content = file_path.read_text().strip()
+                    if token_content:
+                        _id = lokbot.util.decode_jwt(token_content).get('_id')
+                        token_file = file_path
+                        break
+                except:
+                    continue
+        
+        if token_file and token_file.exists():
+            token_from_file = token_file.read_text().strip()
+            logger.info(f'Using token from file: {token_file}')
+            try:
+                farmer = LokFarmer(token_from_file, captcha_solver_config)
+            except NoAuthException:
+                logger.warning('Token from file is invalid, prompting for new token')
+                token = input("Please enter x-token: ")
+                _id = lokbot.util.decode_jwt(token).get('_id')
+                # Save the new token to permanent file
+                project_root.joinpath(f'data/{_id}.token').write_text(token)
+                farmer = LokFarmer(token, captcha_solver_config)
+        else:
+            # No token file exists, prompt user for initial token
             token = input("Please enter x-token: ")
-
-    _id = lokbot.util.decode_jwt(token).get('_id')
-    token_file = project_root.joinpath(f'data/{_id}.token')
-    if token_file.exists():
-        token_from_file = token_file.read_text()
-        logger.info(f'Using token: {token_from_file} from file: {token_file}')
-        try:
-            farmer = LokFarmer(token_from_file, captcha_solver_config)
-        except NoAuthException:
-            logger.info('Token is invalid, using token from command line')
+            _id = lokbot.util.decode_jwt(token).get('_id')
+            # Save the token to permanent file
+            project_root.joinpath(f'data/{_id}.token').write_text(token)
             farmer = LokFarmer(token, captcha_solver_config)
     else:
+        # Token provided via command line, save it to permanent file
+        _id = lokbot.util.decode_jwt(token).get('_id')
+        project_root.joinpath(f'data/{_id}.token').write_text(token)
         farmer = LokFarmer(token, captcha_solver_config)
 
-    threading.Thread(target=farmer.sock_thread, daemon=True).start()
-    threading.Thread(target=farmer.socc_thread, daemon=True).start()
+    try:
+        threading.Thread(target=farmer.sock_thread, daemon=True).start()
+        threading.Thread(target=farmer.socc_thread, daemon=True).start()
+    except FatalApiException as e:
+        logger.error(f"Failed to start threads: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error starting threads: {e}")
+        raise
 
-    farmer.keepalive_request()
+    try:
+        farmer.keepalive_request()
+    except FatalApiException as e:
+        logger.error(f"Failed to perform keepalive request: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during keepalive request: {e}")
+        raise
 
     for job in config.get('main').get('jobs'):
         if not job.get('enabled'):
@@ -92,8 +132,22 @@ def main(token=None, captcha_solver_config=None):
         if not thread.get('enabled'):
             continue
 
-        threading.Thread(target=getattr(farmer, thread.get('name')), kwargs=thread.get('kwargs'), daemon=True).start()
+        try:
+            threading.Thread(target=getattr(farmer, thread.get('name')), kwargs=thread.get('kwargs'), daemon=True).start()
+        except FatalApiException as e:
+            logger.error(f"Failed to start thread {thread.get('name')}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error starting thread {thread.get('name')}: {e}")
+            raise
 
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        try:
+            schedule.run_pending()
+            time.sleep(1)
+        except FatalApiException as e:
+            logger.error(f"Fatal error in main loop: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in main loop: {e}")
+            raise

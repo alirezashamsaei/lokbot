@@ -129,10 +129,11 @@ class LokBotApi:
         code = err.get('code')
 
         if code == 'no_auth':
-            project_root.joinpath(f'data/{self._id}.token').unlink(missing_ok=True)
+            logger.error(f"Authentication failed for user {self._id}: {url}")
             raise NoAuthException()
 
         if code == 'need_captcha':
+            logger.warning(f"Captcha required for user {self._id}: {url}")
             if not self.captcha_solver:
                 raise NeedCaptchaException()
 
@@ -141,14 +142,18 @@ class LokBotApi:
             raise DuplicatedException()
 
         if code == 'duplicated':
+            logger.warning(f"Request duplicated for user {self._id}: {url}")
             raise DuplicatedException()
 
         if code == 'exceed_limit_packet':
+            logger.warning(f"Rate limit exceeded for user {self._id}: {url}")
             raise ExceedLimitPacketException()
 
         if code == 'not_online':
+            logger.error(f"User {self._id} not online: {url}")
             raise NotOnlineException()
 
+        logger.error(f"API error for user {self._id}: {code} at {url}")
         raise OtherException(code)
 
     @tenacity.retry(
@@ -183,7 +188,6 @@ class LokBotApi:
             res = self.post('https://lok-api-live.leagueofkingdoms.com/api/auth/connect', json_data)
         except OtherException:
             # {"result":false,"err":{}} when no auth
-            project_root.joinpath(f'data/{self._id}.token').unlink(missing_ok=True)
             raise NoAuthException()
 
         self.opener.headers['x-access-token'] = res['token']
