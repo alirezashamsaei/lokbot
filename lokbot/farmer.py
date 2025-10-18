@@ -1199,7 +1199,7 @@ class LokFarmer:
             logger.error(f"Unexpected error in building_farmer_thread: {e}")
             raise
 
-    def academy_farmer_thread(self, to_max_level=False, speedup=False):
+    def academy_farmer_thread(self, to_max_level=False, speedup=False, wait_interval=900):
         """
         research farmer
         :param to_max_level:
@@ -1215,7 +1215,7 @@ class LokFarmer:
                 if worker_used[0].get('status') != STATUS_CLAIMED:
                     self.research_queue_available.wait()  # wait for research queue available from `sock_thread`
                     self.research_queue_available.clear()
-                    threading.Thread(target=self.academy_farmer_thread, args=[to_max_level, speedup]).start()
+                    threading.Thread(target=self.academy_farmer_thread, args=[to_max_level, speedup, wait_interval]).start()
                     return
 
                 # If completed, claim reward and continue
@@ -1247,11 +1247,11 @@ class LokFarmer:
 
                     self.research_queue_available.wait()  # wait for research queue available from `sock_thread`
                     self.research_queue_available.clear()
-                    threading.Thread(target=self.academy_farmer_thread, args=[to_max_level, speedup]).start()
+                    threading.Thread(target=self.academy_farmer_thread, args=[to_max_level, speedup, wait_interval]).start()
                     return
 
             logger.info('academy_farmer: no research to do, sleep for 2h')
-            threading.Timer(2 * 3600, self.academy_farmer_thread, [to_max_level]).start()
+            threading.Timer(wait_interval, self.academy_farmer_thread, [to_max_level, speedup, wait_interval]).start()
             return
         except FatalApiException as e:
             logger.error(f"Fatal error in academy_farmer_thread: {e}")

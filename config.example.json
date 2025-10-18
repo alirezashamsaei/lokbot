@@ -136,7 +136,8 @@
         "enabled": true,
         "kwargs": {
           "to_max_level": false,
-          "speedup": true
+          "speedup": true,
+          "wait_interval": 900
         }
       },
       {
