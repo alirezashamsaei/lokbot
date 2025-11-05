@@ -36,9 +36,7 @@
           "gift_claim": true,
           "help_all": true,
           "research_donate": true,
-          "shop_auto_buy_item_code_list": [
-            10101008
-          ]
+          "shop_auto_buy_item_code_list": []
         },
         "interval": {
           "start": 120,
@@ -47,7 +45,7 @@
       },
       {
         "name": "mail_claim",
-        "enabled": true,
+        "enabled": false,
         "interval": {
           "start": 120,
           "end": 200
@@ -55,7 +53,7 @@
       },
       {
         "name": "caravan_farmer",
-        "enabled": true,
+        "enabled": false,
         "interval": {
           "start": 120,
           "end": 200
@@ -63,7 +61,7 @@
       },
       {
         "name": "use_resource_in_item_list",
-        "enabled": true,
+        "enabled": false,
         "interval": {
           "start": 120,
           "end": 200
@@ -97,22 +95,20 @@
               ]
             },
             {
-              "code": 20100106,
-              "level": []
+              "code": 20200104,
+              "level": [
+                3,
+                4
+              ]
             }
           ],
-          "radius": 8,
-          "max_distance": 100,
-          "share_to": {
-            "chat_channels": [
-              1,
-              2
-            ]
-          }
+          "radius": 4,
+          "max_distance": 400,
+          "share_to": null
         },
         "interval": {
-          "start": 1,
-          "end": 1
+          "start": 2,
+          "end": 5
         }
       }
     ],
@@ -129,7 +125,7 @@
         "name": "building_farmer_thread",
         "enabled": true,
         "kwargs": {
-          "speedup": true
+          "speedup": false
         }
       },
       {
@@ -137,7 +133,7 @@
         "enabled": true,
         "kwargs": {
           "to_max_level": false,
-          "speedup": true,
+          "speedup": false,
           "wait_interval": 900
         }
       },
@@ -145,9 +141,9 @@
         "name": "train_troop_thread",
         "enabled": true,
         "kwargs": {
-          "troop_code": 50100101,
-          "speedup": true,
-          "interval": 3600
+          "troop_code": 50100303,
+          "speedup": false,
+          "interval": 1800
         }
       }
     ]
